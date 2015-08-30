@@ -9,6 +9,9 @@ var columnNames = [];
 var csvRows = [];
 var prefixes = [];
 var readStream;
+var schemaObj;
+var tempObj = [];
+var totalProps = 1;
 
 program
     .version(pkg.version)
@@ -17,40 +20,68 @@ program
     .parse(process.argv);
 readStream = fs.createReadStream(path.join(__dirname, program.input));
 
-function isArray(what) {
-    return Object.prototype.toString.call(what) === '[object Array]';
+function isArray(b) {
+    return Object.prototype.toString.call(b) === '[object Array]';
 }
 
-function isObject(what) {
-    return Object.prototype.toString.call(what) === "[object Object]";
+function isObject(b) {
+    return Object.prototype.toString.call(b) === "[object Object]";
 }
 
 var getColumnNames = function(obj) {
+    var clearPrefixes = true;
+    var processedProps = 0;
     for (var property in obj)
     {
         if(obj[property].type == "array") {
             prefixes.push(property.toString());
+            totalProps = obj[property]["items"]["required"].length;
             getColumnNames(obj[property]["items"]["properties"]);
         }
         else if (obj[property].type == "object") {
             prefixes.push(property.toString());
+            tempObj.push(obj[property]["properties"]);
             getColumnNames(obj[property]["properties"]);
         }
         else {
             var columnName = '';
             for (var i = 0; i < prefixes.length ; i++)
             {
-                columnName += prefixes[i] + "_";
+                columnName += prefixes[i] + ".";
             }
             columnName += property.toString();
             columnNames.push(columnName.trim());
+            processedProps++;
+            if (tempObj.length > 0)
+            {
+                var keys = Object.keys(tempObj[tempObj.length-1]);
+                if (processedProps < totalProps)
+                {
+                    continue;
+                }
+                else
+                {
+                    if (keys[keys.length - 1].toString() != prefixes[prefixes.length-1].toString() )
+                    {
+                        prefixes.splice(prefixes.length-1, 1);
+                        clearPrefixes = false;
+                    }
+                }
+            }
         }
     }
-    prefixes = [];
+    processedProps = 0;
+    tempObj = [];
+    totalProps = 1;
+    if (clearPrefixes)
+    {
+        prefixes = [];
+    }
+
 };
 
 var getValue = function(obj, words) {
-    //TODO
+
     var value = '';
     for (var j = 0; j < words.length; j++)
     {
@@ -61,18 +92,18 @@ var getValue = function(obj, words) {
             {
                 if (i === innerValuesCount-1)
                 {
-                    value += obj[i][words[j+1]];
+                    value += obj[i][words[j]];
                 }
                 else
                 {
-                    value += obj[i][words[j+1]] + ";";
+                    value += obj[i][words[j]] + ";";
                 }
             }
             break;
         }
         else if (isObject(obj))
         {
-            value = getValue(obj[words[j]], words.slice(j));
+            value = getValue(obj[words[j]], words.slice(j+1));
             break;
         }
         else
@@ -81,22 +112,15 @@ var getValue = function(obj, words) {
             break;
         }
     }
-
     return value;
-
 };
 
 var addCsvRow = function(dataRow) {
-    //walk through each object and get the values.
-    //need to parse column names as needed
-    //add them to an array of comma separated values
-    //when you encounter arrays, create a value string with ";" separated values.
-
     var csvRow = "";
 
     for(var i = 0; i < columnNames.length; i++)
     {
-        var words = columnNames[i].split("_");
+        var words = columnNames[i].split(".");
         var value;
 
         for (var j = 0; j < words.length; j++)
@@ -110,7 +134,7 @@ var addCsvRow = function(dataRow) {
             {
                 if (isArray(dataRow[words[j]]))
                 {
-                    value = getValue(dataRow[words[j]], words.slice(j));
+                    value = getValue(dataRow[words[j]], words.slice(j+1));
                     break;
                 }
                 else if(isObject(dataRow[words[j]]))
@@ -140,7 +164,7 @@ readStream
     })
     .on('end', function(err) {
         var jsonData = JSON.parse(data);
-        var schemaObj = jsonSchemaGenerator(jsonData);
+        schemaObj = jsonSchemaGenerator(jsonData);
         getColumnNames(schemaObj["items"]["properties"]);
         var csvHeader = '';
         for (var i = 0; i < columnNames.length; i++)
